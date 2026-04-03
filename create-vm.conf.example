@@ -1,0 +1,61 @@
+# create-vm configuration
+# Copy this file to create-vm.conf and edit as needed.
+
+# =============================================================================
+# ESXi Connection
+# =============================================================================
+
+# REQUIRED: ESXi host address
+ESXI_HOST=""                     # e.g., "192.168.1.100" or "esxi.local"
+ESXI_USER="root"
+ESXI_PASSWORD=""
+ESXI_INSECURE=true               # Skip TLS cert verification (typical for ESXi 6.7)
+
+# =============================================================================
+# VM Placement
+# =============================================================================
+
+# REQUIRED: Datastore and network for new VMs
+# Find yours: govc datastore.info / govc network.info
+ESXI_DATASTORE=""                # e.g., "datastore1"
+ESXI_NETWORK=""                  # e.g., "VM Network"
+# ESXI_RESOURCE_POOL=""          # Leave empty for default pool
+
+# =============================================================================
+# VM Defaults
+# =============================================================================
+
+# These can be overridden per-VM via command line flags
+# VM_CPU=2                       # Number of vCPUs
+# VM_MEMORY=4096                 # Memory in MB
+# VM_DISK=50                     # Disk size in GB
+
+# =============================================================================
+# Ubuntu User
+# =============================================================================
+
+VM_USER="andylombardo"
+
+# SSH public key — defaults to ~/.ssh/id_ed25519.pub if not set
+# VM_SSH_PUBKEY="ssh-ed25519 AAAA... user@host"
+
+# =============================================================================
+# Tailscale (optional)
+# =============================================================================
+
+# Pre-authenticated auth key so the VM joins your tailnet automatically.
+# Without this, you'll need to SSH via IP and run 'sudo tailscale up' manually.
+#
+# Create one at: https://login.tailscale.com/admin/settings/keys
+# Recommended: create a reusable, ephemeral key tagged for test servers
+#
+# TAILSCALE_AUTH_KEY="tskey-auth-..."
+
+# =============================================================================
+# Post-Provision
+# =============================================================================
+
+# RUN_SERVER_INIT=true           # Run server-init.sh after VM boots
+# RUN_SEC_AUDIT=true             # Run sec-audit.sh --harden after server-init
+# SEC_AUDIT_REPO="https://github.com/BardSec/sec-audit.git"
+# DOTFILES_REPO="git@github.com:BardSec/dotfiles.git"
