@@ -15,10 +15,36 @@
 # Cloudflare Tunnel
 # =============================================================================
 
-# Tunnel token from the Cloudflare dashboard. When set, cloudflared is
-# installed as a systemd service that starts automatically on boot.
+# Two options for setting up a Cloudflare tunnel:
 #
-# To get a token:
+# --- OPTION A: Fully automated via API (recommended) ---
+#
+# The script will auto-create a tunnel named after the server's hostname
+# (or CLOUDFLARE_TUNNEL_NAME if set), fetch the token, and install the service.
+#
+# CLOUDFLARE_API_TOKEN=""         # API token (see below for how to create)
+# CLOUDFLARE_ACCOUNT_ID=""        # Your Cloudflare account ID
+# CLOUDFLARE_TUNNEL_NAME=""       # Tunnel name (defaults to hostname)
+#
+# How to get your API token:
+#   1. Go to https://dash.cloudflare.com/profile/api-tokens
+#   2. Click "Create Token"
+#   3. Use "Create Custom Token"
+#   4. Set permissions: Account → Cloudflare Tunnel → Edit
+#   5. (Optional) Add Account → Account Settings → Read if you want
+#      the script to verify the account ID
+#   6. Click "Continue to summary" → "Create Token"
+#   7. Copy the token value
+#
+# How to get your Account ID:
+#   1. Go to https://dash.cloudflare.com
+#   2. Click on any domain
+#   3. Your Account ID is in the right sidebar under "API"
+#   OR: it's in the URL: https://dash.cloudflare.com/<account-id>
+#
+# --- OPTION B: Manual token from dashboard ---
+#
+# If you prefer to create tunnels manually in the dashboard:
 #   1. Go to https://one.dash.cloudflare.com → Networks → Tunnels
 #   2. Create a tunnel (or select an existing one)
 #   3. Copy the token from the "Install connector" step

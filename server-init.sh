@@ -49,6 +49,9 @@ INSTALL_GH=true
 # Cloudflare Tunnel
 INSTALL_CLOUDFLARED=true
 CLOUDFLARED_TOKEN=""             # Tunnel token from Cloudflare dashboard (enables service setup)
+CLOUDFLARE_API_TOKEN=""          # API token for auto-creating tunnels (overrides CLOUDFLARED_TOKEN)
+CLOUDFLARE_ACCOUNT_ID=""         # Cloudflare account ID (required with API token)
+CLOUDFLARE_TUNNEL_NAME=""        # Tunnel name (defaults to hostname if empty)
 
 # Git config
 GIT_USER_NAME=""
@@ -363,34 +366,115 @@ install_cloudflared() {
         fi
     fi
 
-    # Configure tunnel service if token is provided
-    if [[ -z "$CLOUDFLARED_TOKEN" ]]; then
-        info "No CLOUDFLARED_TOKEN set — skipping service setup"
-        info "To configure: create a tunnel in the Cloudflare dashboard,"
-        info "copy the token, and set CLOUDFLARED_TOKEN in server-init.conf"
-        return
-    fi
-
-    # Check if already running with the same token
+    # If already running, nothing to do
     if systemctl is-active --quiet cloudflared 2>/dev/null; then
         already "cloudflared tunnel service is running"
         return
     fi
+
+    # Option 1: Auto-create tunnel via Cloudflare API
+    if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+        _cloudflared_setup_via_api
+        return
+    fi
+
+    # Option 2: Use a pre-existing tunnel token from the dashboard
+    if [[ -n "$CLOUDFLARED_TOKEN" ]]; then
+        _cloudflared_setup_via_token "$CLOUDFLARED_TOKEN"
+        return
+    fi
+
+    info "No tunnel credentials configured — skipping service setup"
+    info "Option A: Set CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to auto-create tunnels"
+    info "Option B: Set CLOUDFLARED_TOKEN from the Cloudflare dashboard"
+}
+
+_cloudflared_setup_via_api() {
+    local tunnel_name="${CLOUDFLARE_TUNNEL_NAME:-$(hostname)}"
+    local api_base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        dry "Create Cloudflare tunnel '${tunnel_name}' via API and install as service"
+        return
+    fi
+
+    info "Checking for existing tunnel '${tunnel_name}'..."
+
+    # List tunnels and look for one with our name that isn't deleted
+    local existing
+    existing=$(curl -sf \
+        -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        "${api_base}/cfd_tunnel?name=${tunnel_name}&is_deleted=false" 2>/dev/null || true)
+
+    local tunnel_id=""
+    local tunnel_token=""
+
+    if echo "$existing" | jq -e '.result[0].id' > /dev/null 2>&1; then
+        tunnel_id=$(echo "$existing" | jq -r '.result[0].id')
+        info "Found existing tunnel '${tunnel_name}' (${tunnel_id})"
+    else
+        # Create a new tunnel
+        info "Creating tunnel '${tunnel_name}'..."
+        local tunnel_secret
+        tunnel_secret=$(openssl rand -base64 32)
+
+        local create_response
+        create_response=$(curl -sf \
+            -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\": \"${tunnel_name}\", \"tunnel_secret\": \"${tunnel_secret}\"}" \
+            "${api_base}/cfd_tunnel" 2>/dev/null || true)
+
+        if echo "$create_response" | jq -e '.success' | grep -q 'true' 2>/dev/null; then
+            tunnel_id=$(echo "$create_response" | jq -r '.result.id')
+            ok "Tunnel '${tunnel_name}' created (${tunnel_id})"
+        else
+            local error_msg
+            error_msg=$(echo "$create_response" | jq -r '.errors[0].message // "unknown error"' 2>/dev/null || echo "unknown error")
+            err "Failed to create tunnel: ${error_msg}"
+            return
+        fi
+    fi
+
+    # Get the tunnel token
+    info "Fetching tunnel token..."
+    local token_response
+    token_response=$(curl -sf \
+        -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        "${api_base}/cfd_tunnel/${tunnel_id}/token" 2>/dev/null || true)
+
+    if echo "$token_response" | jq -e '.success' | grep -q 'true' 2>/dev/null; then
+        tunnel_token=$(echo "$token_response" | jq -r '.result')
+    else
+        err "Failed to fetch tunnel token — you may need to set it manually"
+        return
+    fi
+
+    # Install the service with the token
+    _cloudflared_setup_via_token "$tunnel_token"
+}
+
+_cloudflared_setup_via_token() {
+    local token="$1"
 
     if [[ "$DRY_RUN" == true ]]; then
         dry "Install cloudflared as systemd service with tunnel token"
         return
     fi
 
-    # Install the service using the token
-    # This creates /etc/systemd/system/cloudflared.service automatically
-    cloudflared service install "$CLOUDFLARED_TOKEN" > /dev/null 2>&1
+    cloudflared service install "$token" > /dev/null 2>&1
+
+    # Give it a moment to start
+    sleep 2
 
     if systemctl is-active --quiet cloudflared 2>/dev/null; then
         ok "cloudflared tunnel service installed and running"
     else
-        # Sometimes the service needs a moment to start
         systemctl start cloudflared > /dev/null 2>&1 || true
+        sleep 2
         if systemctl is-active --quiet cloudflared 2>/dev/null; then
             ok "cloudflared tunnel service installed and running"
         else
