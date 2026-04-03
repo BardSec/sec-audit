@@ -23,9 +23,9 @@ set -euo pipefail
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONF_FILE="${SCRIPT_DIR}/create-vm.conf"
-OVA_CACHE_DIR="${HOME}/.cache/sec-audit"
-UBUNTU_OVA_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.ova"
-UBUNTU_OVA_FILE="noble-server-cloudimg-amd64.ova"
+CACHE_DIR="${HOME}/.cache/sec-audit"
+UBUNTU_IMG_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.vmdk"
+UBUNTU_IMG_FILE="noble-server-cloudimg-amd64.vmdk"
 
 # Colors
 RED='\033[0;31m'
@@ -170,8 +170,8 @@ validate() {
         errors=$((errors + 1))
     fi
 
-    if ! command -v govc &> /dev/null; then
-        err "govc is not installed — run: brew install govc"
+    if ! command -v sshpass &> /dev/null; then
+        err "sshpass is not installed — run: brew install sshpass"
         errors=$((errors + 1))
     fi
 
@@ -186,43 +186,64 @@ validate() {
 # Steps
 # =============================================================================
 
-setup_govc_env() {
-    export GOVC_URL="https://${ESXI_HOST}"
-    export GOVC_USERNAME="${ESXI_USER}"
-    export GOVC_PASSWORD="${ESXI_PASSWORD}"
-    export GOVC_INSECURE="${ESXI_INSECURE}"
-    if [[ -n "$ESXI_DATASTORE" ]]; then
-        export GOVC_DATASTORE="${ESXI_DATASTORE}"
-    fi
-    if [[ -n "$ESXI_RESOURCE_POOL" ]]; then
-        export GOVC_RESOURCE_POOL="${ESXI_RESOURCE_POOL}"
-    fi
-}
 
-download_ova() {
+download_image() {
     section "Ubuntu Cloud Image"
 
-    mkdir -p "$OVA_CACHE_DIR"
-    local ova_path="${OVA_CACHE_DIR}/${UBUNTU_OVA_FILE}"
+    mkdir -p "$CACHE_DIR"
+    local img_path="${CACHE_DIR}/${UBUNTU_IMG_FILE}"
 
-    if [[ -f "$ova_path" ]]; then
-        already "$ova_path"
+    if [[ -f "$img_path" ]]; then
+        already "$img_path"
         return
     fi
 
     if [[ "$DRY_RUN" == true ]]; then
-        dry "Download Ubuntu 24.04 cloud image to ${ova_path}"
+        dry "Download Ubuntu 24.04 cloud image to ${img_path}"
         return
     fi
 
-    info "Downloading Ubuntu 24.04 cloud image..."
-    info "URL: ${UBUNTU_OVA_URL}"
-    curl -fSL -o "$ova_path" "$UBUNTU_OVA_URL"
-    ok "Downloaded to ${ova_path}"
+    info "Downloading Ubuntu 24.04 VMDK..."
+    info "URL: ${UBUNTU_IMG_URL}"
+    curl -fSL -o "$img_path" "$UBUNTU_IMG_URL"
+    ok "Downloaded to ${img_path}"
 }
 
 already() {
     echo -e "  ${GREEN}[CACHED]${NC} $1"
+}
+
+create_seed_iso() {
+    # Create a cloud-init seed ISO to inject user-data and meta-data
+    local iso_path="${CACHE_DIR}/${VM_NAME}-seed.iso"
+    local seed_dir="${CACHE_DIR}/${VM_NAME}-seed"
+
+    mkdir -p "$seed_dir"
+
+    # meta-data
+    cat > "${seed_dir}/meta-data" <<METADATA
+instance-id: ${VM_NAME}
+local-hostname: ${VM_NAME}
+METADATA
+
+    # user-data
+    generate_cloud_init > "${seed_dir}/user-data"
+
+    # Create ISO
+    if command -v mkisofs &> /dev/null; then
+        mkisofs -output "$iso_path" -volid cidata -joliet -rock \
+            "${seed_dir}/user-data" "${seed_dir}/meta-data" > /dev/null 2>&1
+    elif command -v hdiutil &> /dev/null; then
+        # macOS approach
+        hdiutil makehybrid -o "$iso_path" -hfs -joliet -iso -default-volume-name cidata \
+            "$seed_dir" > /dev/null 2>&1
+    else
+        err "No ISO creation tool found (need mkisofs or hdiutil)"
+        return 1
+    fi
+
+    rm -rf "$seed_dir"
+    echo "$iso_path"
 }
 
 generate_cloud_init() {
@@ -270,69 +291,105 @@ power_state:
 CLOUDINIT
 }
 
+esxi_ssh() {
+    # Run a command on ESXi via SSH
+    sshpass -p "$ESXI_PASSWORD" ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+        "${ESXI_USER}@${ESXI_HOST}" "$@"
+}
+
+esxi_scp() {
+    # Upload a file to ESXi via SCP
+    sshpass -p "$ESXI_PASSWORD" scp -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+        "$1" "${ESXI_USER}@${ESXI_HOST}:$2"
+}
+
 deploy_vm() {
     section "Deploy VM"
 
-    local ova_path="${OVA_CACHE_DIR}/${UBUNTU_OVA_FILE}"
+    local img_path="${CACHE_DIR}/${UBUNTU_IMG_FILE}"
+    local ds_path="/vmfs/volumes/${ESXI_DATASTORE}"
+    local vm_dir="${ds_path}/${VM_NAME}"
 
-    # Check if VM already exists
-    if govc vm.info "$VM_NAME" > /dev/null 2>&1; then
-        err "VM '${VM_NAME}' already exists on ${ESXI_HOST}"
-        err "Delete it first: govc vm.destroy ${VM_NAME}"
+    # Check if VM directory already exists
+    if esxi_ssh "test -d '${vm_dir}'" 2>/dev/null; then
+        err "VM directory '${VM_NAME}' already exists on datastore"
+        err "Delete it first or choose a different name"
         exit 1
     fi
 
     if [[ "$DRY_RUN" == true ]]; then
-        dry "Deploy OVA as '${VM_NAME}' (${VM_CPU} CPU, ${VM_MEMORY}MB RAM, ${VM_DISK}GB disk)"
+        dry "Create VM '${VM_NAME}' (${VM_CPU} CPU, ${VM_MEMORY}MB RAM, ${VM_DISK}GB disk)"
+        dry "Upload VMDK and cloud-init seed ISO"
         dry "Network: ${ESXI_NETWORK}, Datastore: ${ESXI_DATASTORE}"
         return
     fi
 
-    info "Deploying OVA as '${VM_NAME}'..."
+    # Create VM directory
+    info "Creating VM directory..."
+    esxi_ssh "mkdir -p '${vm_dir}'"
 
-    # Deploy the OVA
-    govc import.ova \
-        -name "$VM_NAME" \
-        -ds "$ESXI_DATASTORE" \
-        -net "$ESXI_NETWORK" \
-        "$ova_path"
+    # Upload the VMDK
+    info "Uploading Ubuntu cloud image VMDK (this may take a few minutes)..."
+    esxi_scp "$img_path" "${vm_dir}/ubuntu-source.vmdk"
+    ok "VMDK uploaded"
 
-    ok "OVA deployed"
+    # Convert to ESXi-compatible disk using vmkfstools
+    info "Converting disk to ESXi format and resizing to ${VM_DISK}GB..."
+    esxi_ssh "vmkfstools -i '${vm_dir}/ubuntu-source.vmdk' '${vm_dir}/${VM_NAME}.vmdk' -d thin && \
+              rm -f '${vm_dir}/ubuntu-source.vmdk' && \
+              vmkfstools -X ${VM_DISK}G '${vm_dir}/${VM_NAME}.vmdk'"
+    ok "Disk converted and resized"
 
-    # Resize CPU and memory
-    info "Configuring VM: ${VM_CPU} CPU, ${VM_MEMORY}MB RAM..."
-    govc vm.change -vm "$VM_NAME" \
-        -c "$VM_CPU" \
-        -m "$VM_MEMORY"
+    # Create and upload cloud-init seed ISO
+    info "Creating cloud-init seed ISO..."
+    local seed_iso
+    seed_iso=$(create_seed_iso)
 
-    # Resize disk
-    info "Resizing disk to ${VM_DISK}GB..."
-    govc vm.disk.change -vm "$VM_NAME" \
-        -size "${VM_DISK}G" 2>/dev/null || true
+    info "Uploading seed ISO..."
+    esxi_scp "$seed_iso" "${vm_dir}/seed.iso"
+    rm -f "$seed_iso"
+    ok "Seed ISO uploaded"
 
-    # Inject cloud-init via guestinfo
-    info "Injecting cloud-init configuration..."
-    local userdata
-    userdata=$(generate_cloud_init | base64)
+    # Generate VMX file locally and upload
+    info "Creating VM configuration..."
+    local local_vmx="${CACHE_DIR}/${VM_NAME}.vmx"
+    cat > "$local_vmx" <<VMX
+.encoding = "UTF-8"
+config.version = "8"
+virtualHW.version = "13"
+displayName = "${VM_NAME}"
+guestOS = "ubuntu-64"
+memSize = "${VM_MEMORY}"
+numvcpus = "${VM_CPU}"
+firmware = "bios"
+scsi0.virtualDev = "lsilogic"
+scsi0.present = "TRUE"
+scsi0:0.fileName = "${VM_NAME}.vmdk"
+scsi0:0.present = "TRUE"
+ide1:0.deviceType = "cdrom-image"
+ide1:0.fileName = "seed.iso"
+ide1:0.present = "TRUE"
+ethernet0.virtualDev = "e1000"
+ethernet0.networkName = "${ESXI_NETWORK}"
+ethernet0.addressType = "generated"
+ethernet0.present = "TRUE"
+tools.syncTime = "TRUE"
+VMX
 
-    local metadata
-    metadata=$(cat <<METADATA | base64
-instance-id: ${VM_NAME}
-local-hostname: ${VM_NAME}
-METADATA
-    )
+    esxi_scp "$local_vmx" "${vm_dir}/${VM_NAME}.vmx"
+    rm -f "$local_vmx"
 
-    govc vm.change -vm "$VM_NAME" \
-        -e "guestinfo.metadata=${metadata}" \
-        -e "guestinfo.metadata.encoding=base64" \
-        -e "guestinfo.userdata=${userdata}" \
-        -e "guestinfo.userdata.encoding=base64"
+    ok "VMX created"
 
-    ok "VM configured"
+    # Register the VM
+    info "Registering VM with ESXi..."
+    local vmid
+    vmid=$(esxi_ssh "vim-cmd solo/registervm '${vm_dir}/${VM_NAME}.vmx'")
+    ok "VM registered (ID: ${vmid})"
 
     # Power on
     info "Powering on '${VM_NAME}'..."
-    govc vm.power -on "$VM_NAME"
+    esxi_ssh "vim-cmd vmsvc/power.on ${vmid}"
     ok "VM powered on"
 }
 
@@ -349,15 +406,19 @@ wait_for_ssh() {
     local attempts=0
     local max_attempts=60  # 5 minutes
 
-    while [[ -z "$vm_ip" || "$vm_ip" == "<nil>" ]] && [[ $attempts -lt $max_attempts ]]; do
-        vm_ip=$(govc vm.ip "$VM_NAME" 2>/dev/null || true)
+    # Get VM ID
+    local vmid
+    vmid=$(esxi_ssh "vim-cmd vmsvc/getallvms 2>/dev/null | grep '${VM_NAME}' | awk '{print \$1}'")
+
+    while [[ -z "$vm_ip" ]] && [[ $attempts -lt $max_attempts ]]; do
+        vm_ip=$(esxi_ssh "vim-cmd vmsvc/get.guest ${vmid} 2>/dev/null | grep -m1 'ipAddress = \"' | sed 's/.*ipAddress = \"//;s/\".*//' " || true)
         attempts=$((attempts + 1))
-        if [[ -z "$vm_ip" || "$vm_ip" == "<nil>" ]]; then
+        if [[ -z "$vm_ip" ]]; then
             sleep 5
         fi
     done
 
-    if [[ -z "$vm_ip" || "$vm_ip" == "<nil>" ]]; then
+    if [[ -z "$vm_ip" ]]; then
         err "Timed out waiting for IP address"
         err "Check the VM console in the ESXi UI"
         exit 1
@@ -515,8 +576,7 @@ main() {
 
     validate
 
-    setup_govc_env
-    download_ova
+    download_image
     deploy_vm
     wait_for_ssh
     post_provision
