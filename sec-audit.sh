@@ -123,7 +123,7 @@ log() {
 pass() {
     local msg="$1"
     echo -e "  ${GREEN}[PASS]${NC} $msg"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
     log "PASS: $msg"
     [[ -n "$REPORT_FILE" ]] && echo "[PASS] $msg" >> "$REPORT_FILE"
 }
@@ -131,7 +131,7 @@ pass() {
 fail() {
     local msg="$1"
     echo -e "  ${RED}[FAIL]${NC} $msg"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
     log "FAIL: $msg"
     [[ -n "$REPORT_FILE" ]] && echo "[FAIL] $msg" >> "$REPORT_FILE"
 }
@@ -139,7 +139,7 @@ fail() {
 warn() {
     local msg="$1"
     echo -e "  ${YELLOW}[WARN]${NC} $msg"
-    ((WARN_COUNT++))
+    WARN_COUNT=$((WARN_COUNT + 1))
     log "WARN: $msg"
     [[ -n "$REPORT_FILE" ]] && echo "[WARN] $msg" >> "$REPORT_FILE"
 }
@@ -147,7 +147,7 @@ warn() {
 skip() {
     local msg="$1"
     echo -e "  ${BLUE}[SKIP]${NC} $msg"
-    ((SKIP_COUNT++))
+    SKIP_COUNT=$((SKIP_COUNT + 1))
     log "SKIP: $msg"
     [[ -n "$REPORT_FILE" ]] && echo "[SKIP] $msg" >> "$REPORT_FILE"
 }
@@ -155,7 +155,7 @@ skip() {
 changed() {
     local msg="$1"
     echo -e "  ${GREEN}[FIXED]${NC} $msg"
-    ((CHANGED_COUNT++))
+    CHANGED_COUNT=$((CHANGED_COUNT + 1))
     log "FIXED: $msg"
     [[ -n "$REPORT_FILE" ]] && echo "[FIXED] $msg" >> "$REPORT_FILE"
 }
@@ -217,7 +217,7 @@ check_os() {
             echo -e "  ${BLUE}[INFO]${NC} Updating package lists..."
             timeout 60 apt-get update -qq > /dev/null 2>&1 || true
             local upgradable
-            upgradable=$(timeout 30 apt list --upgradable 2>/dev/null | grep -c upgradable || true)
+            upgradable=$( (timeout 30 apt list --upgradable 2>/dev/null || true) | grep -c upgradable || echo 0)
             if [[ "$upgradable" -gt 0 ]]; then
                 echo -e "  ${BLUE}[INFO]${NC} Upgrading ${upgradable} packages..."
                 DEBIAN_FRONTEND=noninteractive timeout 300 apt-get upgrade -y -qq > /dev/null 2>&1
