@@ -394,7 +394,7 @@ check_firewall() {
     local ufw_status
     ufw_status=$(ufw status 2>/dev/null | head -1)
 
-    if [[ "$ufw_status" == *"active"* ]]; then
+    if [[ "$ufw_status" == "Status: active" ]]; then
         pass "UFW is active"
     else
         if [[ "$MODE" == "harden" ]]; then
@@ -416,7 +416,9 @@ check_firewall() {
         ufw allow "${SSH_PORT}/tcp" comment "SSH" > /dev/null 2>&1
         pass "UFW allows SSH on port ${SSH_PORT}"
     else
-        if ufw status | grep -q "${SSH_PORT}/tcp.*ALLOW"; then
+        local ufw_rules
+        ufw_rules=$(ufw status 2>/dev/null || true)
+        if echo "$ufw_rules" | grep -q "${SSH_PORT}/tcp.*ALLOW"; then
             pass "UFW allows SSH on port ${SSH_PORT}"
         else
             if [[ "$MODE" == "audit" ]]; then
@@ -452,8 +454,9 @@ check_firewall() {
     done
 
     # Check default incoming policy
-    local default_incoming
-    default_incoming=$(ufw status verbose 2>/dev/null | grep "Default:" | grep -o "deny (incoming)\|reject (incoming)" || true)
+    local ufw_verbose default_incoming
+    ufw_verbose=$(ufw status verbose 2>/dev/null || true)
+    default_incoming=$(echo "$ufw_verbose" | grep "Default:" | grep -o "deny (incoming)\|reject (incoming)" || true)
     if [[ -n "$default_incoming" ]]; then
         pass "UFW default incoming policy: deny/reject"
     else
@@ -594,7 +597,7 @@ check_unattended_upgrades() {
         return
     fi
 
-    if dpkg -l | grep -q unattended-upgrades 2>/dev/null; then
+    if dpkg-query -W -f='${Status}' unattended-upgrades 2>/dev/null | grep -q "install ok installed"; then
         pass "unattended-upgrades package installed"
     else
         if [[ "$MODE" == "harden" ]]; then
@@ -753,7 +756,7 @@ check_auditd() {
         return
     fi
 
-    if dpkg -l | grep -q auditd 2>/dev/null; then
+    if command -v auditctl &> /dev/null; then
         pass "auditd is installed"
     else
         if [[ "$MODE" == "harden" ]]; then
