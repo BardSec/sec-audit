@@ -24,7 +24,6 @@ NC='\033[0m'
 # Defaults
 ESXI_HOST=""
 ESXI_USER="root"
-ESXI_PASSWORD=""
 VM_NAME=""
 DRY_RUN=false
 LIST_MODE=false
@@ -54,7 +53,7 @@ EOF
 }
 
 esxi_ssh() {
-    sshpass -p "$ESXI_PASSWORD" ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+    ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
         "${ESXI_USER}@${ESXI_HOST}" "$@"
 }
 
@@ -192,13 +191,8 @@ main() {
     parse_args "$@"
 
     # Validate
-    if [[ -z "$ESXI_HOST" || -z "$ESXI_PASSWORD" ]]; then
-        echo "Error: ESXi credentials not configured. Set them in create-vm.conf"
-        exit 1
-    fi
-
-    if ! command -v sshpass &> /dev/null; then
-        echo "Error: sshpass is not installed — run: brew install sshpass"
+    if [[ -z "$ESXI_HOST" ]]; then
+        echo "Error: ESXI_HOST not configured. Set it in create-vm.conf"
         exit 1
     fi
 

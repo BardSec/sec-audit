@@ -5,11 +5,9 @@
 # ESXi Connection
 # =============================================================================
 
-# REQUIRED: ESXi host address
+# REQUIRED: ESXi host address (SSH key auth must be configured)
 ESXI_HOST=""                     # e.g., "192.168.1.100" or "esxi.local"
 ESXI_USER="root"
-ESXI_PASSWORD=""
-ESXI_INSECURE=true               # Skip TLS cert verification (typical for ESXi 6.7)
 
 # =============================================================================
 # VM Placement

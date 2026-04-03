@@ -8,9 +8,8 @@
 #   ./create-vm.sh --name my-server --dry-run
 #
 # Prerequisites:
-#   - govc (brew install govc)
+#   - SSH key auth configured for ESXi host
 #   - SSH key pair (~/.ssh/id_ed25519.pub)
-#   - ESXi credentials in create-vm.conf or environment
 #
 # Configuration: copy create-vm.conf.example to create-vm.conf and edit.
 
@@ -42,8 +41,6 @@ NC='\033[0m'
 # ESXi connection
 ESXI_HOST=""
 ESXI_USER="root"
-ESXI_PASSWORD=""
-ESXI_INSECURE=true              # Skip TLS verification (common for ESXi 6.7)
 
 # VM placement
 ESXI_DATASTORE=""               # e.g., "datastore1"
@@ -150,11 +147,6 @@ validate() {
         errors=$((errors + 1))
     fi
 
-    if [[ -z "$ESXI_PASSWORD" ]]; then
-        err "ESXI_PASSWORD is not set — configure in create-vm.conf"
-        errors=$((errors + 1))
-    fi
-
     if [[ -z "$ESXI_DATASTORE" ]]; then
         err "ESXI_DATASTORE is not set — configure in create-vm.conf"
         errors=$((errors + 1))
@@ -170,9 +162,12 @@ validate() {
         errors=$((errors + 1))
     fi
 
-    if ! command -v sshpass &> /dev/null; then
-        err "sshpass is not installed — run: brew install sshpass"
-        errors=$((errors + 1))
+    # Verify SSH key access to ESXi
+    if [[ "$DRY_RUN" != true ]]; then
+        if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${ESXI_USER}@${ESXI_HOST}" "echo ok" > /dev/null 2>&1; then
+            err "Cannot SSH to ${ESXI_USER}@${ESXI_HOST} — configure SSH key auth first"
+            errors=$((errors + 1))
+        fi
     fi
 
     if [[ "$errors" -gt 0 ]]; then
@@ -292,14 +287,14 @@ CLOUDINIT
 }
 
 esxi_ssh() {
-    # Run a command on ESXi via SSH
-    sshpass -p "$ESXI_PASSWORD" ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+    # Run a command on ESXi via SSH (key auth)
+    ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
         "${ESXI_USER}@${ESXI_HOST}" "$@"
 }
 
 esxi_scp() {
-    # Upload a file to ESXi via SCP
-    sshpass -p "$ESXI_PASSWORD" scp -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+    # Upload a file to ESXi via SCP (key auth)
+    scp -o StrictHostKeyChecking=no -o LogLevel=ERROR \
         "$1" "${ESXI_USER}@${ESXI_HOST}:$2"
 }
 
