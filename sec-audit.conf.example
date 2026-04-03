@@ -1,0 +1,69 @@
+# sec-audit configuration
+# Copy this file to sec-audit.conf and edit as needed.
+# All values below are the defaults — uncomment and change to override.
+
+# =============================================================================
+# SSH
+# =============================================================================
+
+# SSH_PORT=22                    # Port SSH listens on
+# PERMIT_ROOT_LOGIN="no"        # Disable root login via SSH
+# PASSWORD_AUTH="no"             # Disable password authentication (key-only)
+# SSH_MAX_AUTH_TRIES=3           # Max failed auth attempts before disconnect
+# SSH_LOGIN_GRACE_TIME=30        # Seconds to complete authentication
+# SSH_IDLE_TIMEOUT=300           # Seconds before idle SSH sessions are probed
+# SSH_IDLE_COUNT_MAX=3           # Number of keepalive probes before disconnect
+
+# =============================================================================
+# Firewall (UFW)
+# =============================================================================
+
+# UFW_ENABLED=true               # Enable and configure UFW
+# ALLOWED_PORTS=()               # Additional ports to allow (both TCP/UDP)
+# ALLOWED_PORTS_TCP=()           # Additional TCP-only ports (e.g., (80 443))
+# ALLOWED_PORTS_UDP=()           # Additional UDP-only ports
+
+# Examples:
+# ALLOWED_PORTS_TCP=(80 443)     # Allow HTTP and HTTPS
+# ALLOWED_PORTS_UDP=(51820)      # Allow WireGuard
+
+# =============================================================================
+# Tailscale
+# =============================================================================
+
+# TAILSCALE_ENABLED=true         # Install Tailscale if missing, verify if present
+
+# =============================================================================
+# fail2ban
+# =============================================================================
+
+# FAIL2BAN_ENABLED=true          # Install and configure fail2ban
+# FAIL2BAN_MAXRETRY=5            # Failed attempts before ban
+# FAIL2BAN_BANTIME=3600          # Ban duration in seconds (1 hour)
+# FAIL2BAN_FINDTIME=600          # Window for counting failures (10 minutes)
+
+# =============================================================================
+# Unattended Upgrades
+# =============================================================================
+
+# UNATTENDED_UPGRADES=true       # Enable automatic security updates
+
+# =============================================================================
+# Kernel Hardening
+# =============================================================================
+
+# KERNEL_HARDENING=true          # Apply sysctl hardening parameters
+                                  # Note: if Tailscale is enabled, ip_forward
+                                  # is automatically set to 1 instead of 0
+
+# =============================================================================
+# Audit Logging
+# =============================================================================
+
+# AUDITD_ENABLED=true            # Install and enable auditd
+
+# =============================================================================
+# Users
+# =============================================================================
+
+# DISABLE_ROOT_ACCOUNT=true      # Lock the root account (passwd -l root)
