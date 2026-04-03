@@ -12,6 +12,20 @@
 # INSTALL_CLOUDFLARED=true       # Cloudflare Tunnel client
 
 # =============================================================================
+# Cloudflare Tunnel
+# =============================================================================
+
+# Tunnel token from the Cloudflare dashboard. When set, cloudflared is
+# installed as a systemd service that starts automatically on boot.
+#
+# To get a token:
+#   1. Go to https://one.dash.cloudflare.com → Networks → Tunnels
+#   2. Create a tunnel (or select an existing one)
+#   3. Copy the token from the "Install connector" step
+#
+# CLOUDFLARED_TOKEN="eyJhIjoi..."
+
+# =============================================================================
 # Git configuration
 # =============================================================================
 

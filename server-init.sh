@@ -48,6 +48,7 @@ INSTALL_GH=true
 
 # Cloudflare Tunnel
 INSTALL_CLOUDFLARED=true
+CLOUDFLARED_TOKEN=""             # Tunnel token from Cloudflare dashboard (enables service setup)
 
 # Git config
 GIT_USER_NAME=""
@@ -333,33 +334,68 @@ install_cloudflared() {
         return
     fi
 
+    # Install cloudflared if missing
     if command -v cloudflared &> /dev/null; then
         local cf_version
         cf_version=$(cloudflared --version 2>/dev/null | awk '{print $3}')
         already "cloudflared is installed (${cf_version})"
+    else
+        if [[ "$DRY_RUN" == true ]]; then
+            dry "Install cloudflared via official repo"
+        else
+            info "Adding Cloudflare repository..."
+            mkdir -p -m 755 /etc/apt/keyrings
+            curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /etc/apt/keyrings/cloudflare-main.gpg
+
+            echo \
+                "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
+                > /etc/apt/sources.list.d/cloudflared.list
+
+            apt-get update -qq > /dev/null 2>&1
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cloudflared > /dev/null 2>&1
+
+            if command -v cloudflared &> /dev/null; then
+                ok "cloudflared installed"
+            else
+                err "cloudflared installation failed"
+                return
+            fi
+        fi
+    fi
+
+    # Configure tunnel service if token is provided
+    if [[ -z "$CLOUDFLARED_TOKEN" ]]; then
+        info "No CLOUDFLARED_TOKEN set — skipping service setup"
+        info "To configure: create a tunnel in the Cloudflare dashboard,"
+        info "copy the token, and set CLOUDFLARED_TOKEN in server-init.conf"
+        return
+    fi
+
+    # Check if already running with the same token
+    if systemctl is-active --quiet cloudflared 2>/dev/null; then
+        already "cloudflared tunnel service is running"
         return
     fi
 
     if [[ "$DRY_RUN" == true ]]; then
-        dry "Install cloudflared via official repo"
+        dry "Install cloudflared as systemd service with tunnel token"
         return
     fi
 
-    info "Adding Cloudflare repository..."
-    mkdir -p -m 755 /etc/apt/keyrings
-    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /etc/apt/keyrings/cloudflare-main.gpg
+    # Install the service using the token
+    # This creates /etc/systemd/system/cloudflared.service automatically
+    cloudflared service install "$CLOUDFLARED_TOKEN" > /dev/null 2>&1
 
-    echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
-        > /etc/apt/sources.list.d/cloudflared.list
-
-    apt-get update -qq > /dev/null 2>&1
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cloudflared > /dev/null 2>&1
-
-    if command -v cloudflared &> /dev/null; then
-        ok "cloudflared installed — run 'cloudflared tunnel login' to authenticate"
+    if systemctl is-active --quiet cloudflared 2>/dev/null; then
+        ok "cloudflared tunnel service installed and running"
     else
-        err "cloudflared installation failed"
+        # Sometimes the service needs a moment to start
+        systemctl start cloudflared > /dev/null 2>&1 || true
+        if systemctl is-active --quiet cloudflared 2>/dev/null; then
+            ok "cloudflared tunnel service installed and running"
+        else
+            err "cloudflared service installed but failed to start — check 'systemctl status cloudflared'"
+        fi
     fi
 }
 
@@ -566,7 +602,8 @@ main() {
             fi
         fi
         if command -v cloudflared &> /dev/null && ! systemctl is-active --quiet cloudflared 2>/dev/null; then
-            echo "  - Run: cloudflared tunnel login"
+            echo "  - Set CLOUDFLARED_TOKEN in server-init.conf and rerun, or run manually:"
+            echo "    cloudflared service install <token>"
         fi
         echo "  - Run: sudo ./sec-audit.sh --harden"
     fi
