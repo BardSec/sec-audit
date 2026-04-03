@@ -478,7 +478,7 @@ check_tailscale() {
         pass "Tailscale is installed"
 
         local ts_status
-        ts_status=$(tailscale status --json 2>/dev/null | grep -o '"BackendState":"[^"]*"' | cut -d'"' -f4 || true)
+        ts_status=$(tailscale status --json 2>/dev/null | grep -o '"BackendState":\s*"[^"]*"' | cut -d'"' -f4 || true)
 
         if [[ "$ts_status" == "Running" ]]; then
             pass "Tailscale is running"
