@@ -215,12 +215,12 @@ check_os() {
             dry "Run apt update && apt upgrade -y"
         else
             echo -e "  ${BLUE}[INFO]${NC} Updating package lists..."
-            apt-get update -qq > /dev/null 2>&1
+            timeout 60 apt-get update -qq > /dev/null 2>&1 || true
             local upgradable
-            upgradable=$(apt list --upgradable 2>/dev/null | grep -c upgradable || true)
+            upgradable=$(timeout 30 apt list --upgradable 2>/dev/null | grep -c upgradable || true)
             if [[ "$upgradable" -gt 0 ]]; then
                 echo -e "  ${BLUE}[INFO]${NC} Upgrading ${upgradable} packages..."
-                DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq > /dev/null 2>&1
+                DEBIAN_FRONTEND=noninteractive timeout 300 apt-get upgrade -y -qq > /dev/null 2>&1
                 changed "System packages upgraded (${upgradable} packages)"
             else
                 pass "System packages are up to date"
@@ -228,8 +228,8 @@ check_os() {
         fi
     else
         local upgradable
-        apt-get update -qq > /dev/null 2>&1
-        upgradable=$(apt list --upgradable 2>/dev/null | grep -c upgradable || true)
+        timeout 60 apt-get update -qq > /dev/null 2>&1 || true
+        upgradable=$(timeout 30 apt list --upgradable 2>/dev/null | grep -c upgradable || true)
         if [[ "$upgradable" -gt 0 ]]; then
             fail "System has ${upgradable} upgradable packages"
         else
