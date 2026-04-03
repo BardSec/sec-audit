@@ -2,3 +2,4 @@ sec-audit.conf
 *.log
 *.bak
 .DS_Store
+create-vm.conf
