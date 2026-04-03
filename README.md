@@ -1,35 +1,106 @@
 # sec-audit
 
-A single-script tool to **harden** or **audit** Ubuntu 24.04 LTS servers against a security baseline.
+Tools to **provision** and **secure** Ubuntu 24.04 LTS servers. Two scripts, one workflow:
 
-Run it on a fresh VM to apply all hardening at once, or on an existing server to get a pass/fail report of its current state.
+1. **`server-init.sh`** — Install standard tooling (Docker, Tailscale, GitHub CLI, Cloudflare Tunnel, etc.)
+2. **`sec-audit.sh`** — Harden or audit the server against a security baseline
 
 ## Quick Start
 
 ```bash
-# Clone the repo
 git clone https://github.com/BardSec/sec-audit.git
 cd sec-audit
 
-# Audit an existing server (read-only, changes nothing)
-sudo ./sec-audit.sh --audit
+# 1. Provision a fresh VM
+sudo ./server-init.sh
 
-# Harden a fresh server
+# 2. Harden it
 sudo ./sec-audit.sh --harden
-
-# Preview what would change without applying
-sudo ./sec-audit.sh --harden --dry-run
 ```
 
 ### One-liner for a fresh VM
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BardSec/sec-audit/main/sec-audit.sh -o /tmp/sec-audit.sh && \
-chmod +x /tmp/sec-audit.sh && \
-sudo /tmp/sec-audit.sh --harden
+git clone https://github.com/BardSec/sec-audit.git /tmp/sec-audit && \
+cd /tmp/sec-audit && \
+sudo ./server-init.sh && \
+sudo ./sec-audit.sh --harden
 ```
 
-## What It Checks
+---
+
+## server-init.sh — Provisioning
+
+Installs and configures standard tooling on a fresh Ubuntu 24.04 VM. Idempotent — safe to rerun.
+
+### Usage
+
+```bash
+sudo ./server-init.sh              # Install everything
+sudo ./server-init.sh --dry-run    # Preview what would be installed
+```
+
+### What It Installs
+
+| Component | Details |
+|---|---|
+| **Baseline packages** | curl, wget, git, htop, unzip, jq, tree, net-tools, ca-certificates, etc. |
+| **Docker** | Docker Engine + Compose plugin via official repo |
+| **Tailscale** | VPN client via official install script |
+| **GitHub CLI** | `gh` via official repo |
+| **Cloudflare Tunnel** | `cloudflared` via official repo |
+| **Git config** | User name and email (optional) |
+| **User setup** | Docker group membership, NOPASSWD sudo, SSH authorized key (optional) |
+
+### Configuration
+
+```bash
+cp server-init.conf.example server-init.conf
+```
+
+Common customizations:
+
+```bash
+# User setup
+SETUP_USER="andylombardo"
+ADD_TO_DOCKER_GROUP=true
+SETUP_NOPASSWD_SUDO=true
+
+# Git
+GIT_USER_NAME="Andy Lombardo"
+GIT_USER_EMAIL="andy@example.com"
+
+# Extra packages
+EXTRA_PACKAGES=(vim tmux rsync)
+
+# Skip components you don't need
+INSTALL_CLOUDFLARED=false
+```
+
+### Post-install Steps
+
+After running `server-init.sh`, you may need to:
+
+- `sudo tailscale up` — authenticate to your tailnet
+- `cloudflared tunnel login` — authenticate to Cloudflare
+- Log out and back in for docker group to take effect
+
+---
+
+## sec-audit.sh — Security Hardening & Audit
+
+Hardens or audits a server against a security baseline. Each check works in both modes.
+
+### Usage
+
+```bash
+sudo ./sec-audit.sh --audit              # Check current state (read-only)
+sudo ./sec-audit.sh --harden             # Apply security baselines
+sudo ./sec-audit.sh --harden --dry-run   # Preview changes
+sudo ./sec-audit.sh --audit --report /tmp/report.txt  # Save results to file
+```
+
+### What It Checks
 
 | Category | Checks |
 |---|---|
@@ -41,29 +112,24 @@ sudo /tmp/sec-audit.sh --harden
 | **fail2ban** | Installed, running, SSH jail configured with tunable maxretry/bantime/findtime |
 | **Unattended Upgrades** | Package installed, automatic security updates enabled |
 | **File Permissions** | `/etc/passwd` (644), `/etc/shadow` (640), `/etc/group` (644), `/etc/gshadow` (640), `/etc/ssh/sshd_config` (600), world-writable file scan |
-| **Kernel Hardening** | 17 sysctl parameters including SYN cookies, ICMP redirects, source routing, martian logging, ASLR (auto-adjusts IP forwarding for Tailscale) |
+| **Kernel Hardening** | 17 sysctl parameters including SYN cookies, ICMP redirects, source routing, martian logging, ASLR (auto-adjusts for Tailscale and Docker) |
 | **Audit Logging** | auditd installed and running |
 | **Services** | Unnecessary services disabled (avahi-daemon, cups, rpcbind) |
 | **Login Banner** | Authorized-use warning banner at `/etc/issue.net`, SSH configured to display it |
 | **Users** | No empty passwords, sudo group membership listed |
 
-## Modes
+### Modes
 
-### `--audit` (read-only)
-
-Checks every item and reports PASS, FAIL, WARN, or SKIP. Changes nothing. Exits with code 1 if any checks fail (useful for CI/monitoring).
+**`--audit`** — Read-only. Reports PASS/FAIL/WARN/SKIP. Exits with code 1 if any checks fail.
 
 ```
   [PASS] Ubuntu 24.04 LTS detected
   [PASS] Root account is locked
   [FAIL] SSH PasswordAuthentication = yes (expected: no)
   [PASS] UFW is active
-  [WARN] Unnecessary service running: cups
 ```
 
-### `--harden`
-
-Applies fixes for any failing checks. Safe to run multiple times (idempotent). SSH changes are written to a drop-in file (`/etc/ssh/sshd_config.d/99-sec-audit.conf`) to avoid modifying the system sshd_config.
+**`--harden`** — Applies fixes. Idempotent. SSH changes go to a drop-in file (`/etc/ssh/sshd_config.d/99-sec-audit.conf`), not the original config.
 
 ```
   [PASS] Ubuntu 24.04 LTS detected
@@ -72,82 +138,48 @@ Applies fixes for any failing checks. Safe to run multiple times (idempotent). S
   [FIXED] UFW enabled (default deny incoming, allow outgoing)
 ```
 
-### `--harden --dry-run`
-
-Shows what would change without applying anything.
+**`--harden --dry-run`** — Preview without applying.
 
 ```
   [DRY-RUN] Would: Lock root account (passwd -l root)
   [DRY-RUN] Would: Set SSH PasswordAuthentication = no (currently: yes)
 ```
 
-## Configuration
-
-Copy the example config and edit as needed:
+### Configuration
 
 ```bash
 cp sec-audit.conf.example sec-audit.conf
 ```
 
-Or use a custom config file:
+Common customizations:
 
-```bash
-sudo ./sec-audit.sh --harden --config /path/to/my.conf
-```
-
-All settings have sensible defaults — the config file is optional. See `sec-audit.conf.example` for all available options.
-
-### Common Customizations
-
-**Change SSH port:**
 ```bash
 SSH_PORT=2222
-```
-
-**Allow web traffic through the firewall:**
-```bash
 ALLOWED_PORTS_TCP=(80 443)
-```
-
-**Disable Tailscale checks (not every server uses it):**
-```bash
 TAILSCALE_ENABLED=false
-```
-
-**Adjust fail2ban thresholds:**
-```bash
 FAIL2BAN_MAXRETRY=3
 FAIL2BAN_BANTIME=86400    # 24 hours
 ```
 
-## Reporting
-
-Save audit results to a file:
-
-```bash
-sudo ./sec-audit.sh --audit --report /tmp/audit-report.txt
-```
-
-Results are also logged to `/var/log/sec-audit.log`.
+---
 
 ## Requirements
 
 - Ubuntu 24.04 LTS (will warn on other versions)
 - Root access (`sudo`)
-- Internet access (for package installation in harden mode)
+- Internet access (for package installation)
 
 ## How It Works
 
-- Each security area is an independent check function
-- In **audit mode**, checks report current state without modification
-- In **harden mode**, checks fix any failing items and report what changed
-- SSH hardening uses a drop-in file (`/etc/ssh/sshd_config.d/99-sec-audit.conf`) — your original `sshd_config` is never modified
-- Kernel hardening uses `/etc/sysctl.d/99-sec-audit.conf`
-- All managed config files include a comment header identifying them as sec-audit managed
+- Both scripts are idempotent — safe to run repeatedly
+- `server-init.sh` uses official repos for Docker, GitHub CLI, and Cloudflare
+- `sec-audit.sh` uses drop-in config files — originals are never modified
+- All managed configs include a comment header identifying them as managed by these tools
+- Results are logged to `/var/log/server-init.log` and `/var/log/sec-audit.log`
 
 ## Contributing
 
-Issues and pull requests are welcome. When adding a new check:
+Issues and pull requests are welcome. When adding a new check to `sec-audit.sh`:
 
 1. Add a `check_*` function following the existing pattern
 2. Support both `audit` and `harden` modes (and `--dry-run`)
@@ -155,6 +187,13 @@ Issues and pull requests are welcome. When adding a new check:
 4. Make the check configurable via `sec-audit.conf` with a sensible default
 5. Add the check to the `main` function's execution list
 6. Update the README table
+
+When adding a new component to `server-init.sh`:
+
+1. Add an `install_*` function following the existing pattern
+2. Support `--dry-run` and idempotent behavior
+3. Add a config toggle (e.g., `INSTALL_MYPACKAGE=true`)
+4. Call the function from `main`
 
 ## License
 

@@ -1,0 +1,57 @@
+# server-init configuration
+# Copy this file to server-init.conf and edit as needed.
+# All values below are the defaults — uncomment and change to override.
+
+# =============================================================================
+# Components to install
+# =============================================================================
+
+# INSTALL_DOCKER=true            # Docker Engine + Compose plugin
+# INSTALL_TAILSCALE=true         # Tailscale VPN
+# INSTALL_GH=true                # GitHub CLI
+# INSTALL_CLOUDFLARED=true       # Cloudflare Tunnel client
+
+# =============================================================================
+# Git configuration
+# =============================================================================
+
+# GIT_USER_NAME="Your Name"
+# GIT_USER_EMAIL="you@example.com"
+
+# =============================================================================
+# User setup
+# =============================================================================
+
+# SETUP_USER="andylombardo"      # Username to configure
+# ADD_TO_DOCKER_GROUP=true       # Add user to docker group
+# SETUP_NOPASSWD_SUDO=false     # Grant NOPASSWD sudo access
+
+# SSH public key to add to authorized_keys (paste the full key here)
+# SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... user@host"
+
+# =============================================================================
+# Extra packages
+# =============================================================================
+
+# Add any additional apt packages you want installed
+# EXTRA_PACKAGES=(vim tmux rsync)
+
+# =============================================================================
+# Baseline packages (override the default list if needed)
+# =============================================================================
+
+# BASELINE_PACKAGES=(
+#     curl
+#     wget
+#     git
+#     htop
+#     unzip
+#     jq
+#     tree
+#     net-tools
+#     software-properties-common
+#     apt-transport-https
+#     ca-certificates
+#     gnupg
+#     lsb-release
+# )
