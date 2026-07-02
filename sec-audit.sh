@@ -125,7 +125,7 @@ pass() {
     echo -e "  ${GREEN}[PASS]${NC} $msg"
     PASS_COUNT=$((PASS_COUNT + 1))
     log "PASS: $msg"
-    [[ -n "$REPORT_FILE" ]] && echo "[PASS] $msg" >> "$REPORT_FILE"
+    if [[ -n "$REPORT_FILE" ]]; then echo "[PASS] $msg" >> "$REPORT_FILE"; fi
 }
 
 fail() {
@@ -133,7 +133,7 @@ fail() {
     echo -e "  ${RED}[FAIL]${NC} $msg"
     FAIL_COUNT=$((FAIL_COUNT + 1))
     log "FAIL: $msg"
-    [[ -n "$REPORT_FILE" ]] && echo "[FAIL] $msg" >> "$REPORT_FILE"
+    if [[ -n "$REPORT_FILE" ]]; then echo "[FAIL] $msg" >> "$REPORT_FILE"; fi
 }
 
 warn() {
@@ -141,7 +141,7 @@ warn() {
     echo -e "  ${YELLOW}[WARN]${NC} $msg"
     WARN_COUNT=$((WARN_COUNT + 1))
     log "WARN: $msg"
-    [[ -n "$REPORT_FILE" ]] && echo "[WARN] $msg" >> "$REPORT_FILE"
+    if [[ -n "$REPORT_FILE" ]]; then echo "[WARN] $msg" >> "$REPORT_FILE"; fi
 }
 
 skip() {
@@ -149,7 +149,7 @@ skip() {
     echo -e "  ${BLUE}[SKIP]${NC} $msg"
     SKIP_COUNT=$((SKIP_COUNT + 1))
     log "SKIP: $msg"
-    [[ -n "$REPORT_FILE" ]] && echo "[SKIP] $msg" >> "$REPORT_FILE"
+    if [[ -n "$REPORT_FILE" ]]; then echo "[SKIP] $msg" >> "$REPORT_FILE"; fi
 }
 
 changed() {
@@ -157,21 +157,21 @@ changed() {
     echo -e "  ${GREEN}[FIXED]${NC} $msg"
     CHANGED_COUNT=$((CHANGED_COUNT + 1))
     log "FIXED: $msg"
-    [[ -n "$REPORT_FILE" ]] && echo "[FIXED] $msg" >> "$REPORT_FILE"
+    if [[ -n "$REPORT_FILE" ]]; then echo "[FIXED] $msg" >> "$REPORT_FILE"; fi
 }
 
 dry() {
     local msg="$1"
     echo -e "  ${YELLOW}[DRY-RUN]${NC} Would: $msg"
     log "DRY-RUN: $msg"
-    [[ -n "$REPORT_FILE" ]] && echo "[DRY-RUN] Would: $msg" >> "$REPORT_FILE"
+    if [[ -n "$REPORT_FILE" ]]; then echo "[DRY-RUN] Would: $msg" >> "$REPORT_FILE"; fi
 }
 
 section() {
     echo ""
     echo -e "${BOLD}── $1 ──${NC}"
     log "=== $1 ==="
-    [[ -n "$REPORT_FILE" ]] && echo "" >> "$REPORT_FILE" && echo "── $1 ──" >> "$REPORT_FILE"
+    if [[ -n "$REPORT_FILE" ]]; then echo "" >> "$REPORT_FILE"; echo "── $1 ──" >> "$REPORT_FILE"; fi
 }
 
 # Check if a config directive exists in a file
@@ -1021,7 +1021,7 @@ main() {
         echo "FAIL: ${FAIL_COUNT}" >> "$REPORT_FILE"
         echo "WARN: ${WARN_COUNT}" >> "$REPORT_FILE"
         echo "SKIP: ${SKIP_COUNT}" >> "$REPORT_FILE"
-        [[ "$MODE" == "harden" ]] && echo "FIXED: ${CHANGED_COUNT}" >> "$REPORT_FILE"
+        if [[ "$MODE" == "harden" ]]; then echo "FIXED: ${CHANGED_COUNT}" >> "$REPORT_FILE"; fi
         echo -e "  Report saved to: ${REPORT_FILE}"
     fi
 
