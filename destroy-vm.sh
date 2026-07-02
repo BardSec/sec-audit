@@ -63,6 +63,8 @@ json_val() {
     python3 -c "import sys,json; d=json.load(sys.stdin); print(d$1)" 2>/dev/null
 }
 
+dry() { echo -e "  ${YELLOW}[DRY-RUN]${NC} Would: $1"; }
+
 urlencode() {
     python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.stdin.read().strip(), safe=''))"
 }
@@ -165,6 +167,22 @@ destroy_vm() {
     echo ""
     echo -e "${BOLD}destroy-vm v${VERSION}${NC}"
 
+    if [[ "$DRY_RUN" == true ]]; then
+        # Preview from the target given on the command line — no auth, no API calls
+        local target
+        if [[ -n "$VM_ID" ]]; then
+            target="ID: ${VM_ID}"
+        else
+            target="name: ${VM_NAME}"
+        fi
+        echo -e "  Target: ${BOLD}${target}${NC}"
+        echo ""
+        dry "Resolve VM (${target}) and stop it if running"
+        dry "Destroy VM and delete all disks"
+        echo ""
+        return
+    fi
+
     resolve_vm_id
 
     # Get VM info
@@ -174,14 +192,6 @@ destroy_vm() {
 
     echo -e "  VM: ${BOLD}${vm_name}${NC} (ID: ${VM_ID})"
     echo -e "  Status: ${vm_status}"
-
-    if [[ "$DRY_RUN" == true ]]; then
-        echo ""
-        dry "Stop VM '${vm_name}' (ID: ${VM_ID})"
-        dry "Destroy VM and delete all disks"
-        echo ""
-        return
-    fi
 
     # Stop if running
     if [[ "$vm_status" == "running" ]]; then
@@ -253,6 +263,19 @@ main() {
         exit 1
     fi
 
+    if [[ -z "$VM_NAME" ]] && [[ -z "$VM_ID" ]] && [[ "$LIST_MODE" != true ]]; then
+        echo "Error: --name or --id is required (or use --list)"
+        usage
+        exit 1
+    fi
+
+    # Dry-run previews from the given target only — no auth, no API calls.
+    # List and real destroys both need a live connection.
+    if [[ "$DRY_RUN" == true ]] && [[ "$LIST_MODE" != true ]]; then
+        destroy_vm
+        exit 0
+    fi
+
     pve_auth
 
     # Auto-detect node
@@ -263,12 +286,6 @@ main() {
     if [[ "$LIST_MODE" == true ]]; then
         list_vms
         exit 0
-    fi
-
-    if [[ -z "$VM_NAME" ]] && [[ -z "$VM_ID" ]]; then
-        echo "Error: --name or --id is required (or use --list)"
-        usage
-        exit 1
     fi
 
     destroy_vm
