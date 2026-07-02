@@ -266,6 +266,15 @@ check_root_account() {
     fi
 }
 
+# Confirm sshd is actually answering on a port by reading its banner.
+# Returns 0 only if a live SSH server greets us — a valid config that
+# somehow failed to bind will still be caught here.
+ssh_self_test() {
+    local port="${1:-$SSH_PORT}"
+    timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/${port} && head -1 <&3" 2>/dev/null \
+        | grep -q "^SSH-"
+}
+
 check_ssh() {
     section "SSH Configuration"
 
@@ -373,6 +382,21 @@ check_ssh() {
             fi
         elif systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
             changed "SSH service restarted"
+            # Self-test: don't trust the restart — confirm sshd actually answers.
+            if ssh_self_test "$SSH_PORT"; then
+                pass "SSH self-test: sshd answering on port ${SSH_PORT}"
+            else
+                fail "SSH self-test FAILED — sshd not answering on port ${SSH_PORT}"
+                if [[ -f "$hardening_file" ]]; then
+                    rm -f "$hardening_file"
+                    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+                    if ssh_self_test "$SSH_PORT"; then
+                        warn "Reverted ${hardening_file} and restored SSH — KEEP your current session open"
+                    else
+                        fail "SSH still not answering after revert — DO NOT close your session; use the provider console"
+                    fi
+                fi
+            fi
         else
             fail "SSH service failed to restart — check 'systemctl status ssh'"
         fi
