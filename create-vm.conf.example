@@ -1,23 +1,28 @@
-# create-vm configuration
+# create-vm configuration (Proxmox)
 # Copy this file to create-vm.conf and edit as needed.
 
 # =============================================================================
-# ESXi Connection
+# Proxmox Connection
 # =============================================================================
 
-# REQUIRED: ESXi host address (SSH key auth must be configured)
-ESXI_HOST=""                     # e.g., "192.168.1.100" or "esxi.local"
-ESXI_USER="root"
+# REQUIRED: Proxmox host address and credentials
+PVE_HOST=""                      # e.g., "192.168.1.87" or Tailscale IP
+PVE_PORT=8006
+PVE_USER="root@pam"
+PVE_PASSWORD=""
+
+# Node name — auto-detected from API if empty
+# PVE_NODE=""                    # e.g., "proxmox"
 
 # =============================================================================
 # VM Placement
 # =============================================================================
 
-# REQUIRED: Datastore and network for new VMs
-# Find yours: govc datastore.info / govc network.info
-ESXI_DATASTORE=""                # e.g., "datastore1"
-ESXI_NETWORK=""                  # e.g., "VM Network"
-# ESXI_RESOURCE_POOL=""          # Leave empty for default pool
+# REQUIRED: Storage and network for new VMs
+PVE_STORAGE="local-lvm"         # Storage for VM disks (LVM, ZFS, Ceph, etc.)
+PVE_ISO_STORAGE="local"         # Storage for cloud image downloads (needs 'iso' content type)
+PVE_BRIDGE="vmbr0"              # Network bridge
+# PVE_VLAN=""                   # VLAN tag (e.g., "40"), leave empty for untagged
 
 # =============================================================================
 # VM Defaults
@@ -27,6 +32,11 @@ ESXI_NETWORK=""                  # e.g., "VM Network"
 # VM_CPU=2                       # Number of vCPUs
 # VM_MEMORY=4096                 # Memory in MB
 # VM_DISK=50                     # Disk size in GB
+
+# Static IP (optional — omit for DHCP)
+# VM_IP="192.168.40.10/24"      # CIDR notation
+# VM_GATEWAY="192.168.40.1"
+# VM_NAMESERVER="192.168.40.1"
 
 # =============================================================================
 # Ubuntu User
@@ -45,7 +55,7 @@ VM_USER="andylombardo"
 # Without this, you'll need to SSH via IP and run 'sudo tailscale up' manually.
 #
 # Create one at: https://login.tailscale.com/admin/settings/keys
-# Recommended: create a reusable, ephemeral key tagged for test servers
+# Recommended: reusable key (NOT ephemeral)
 #
 # TAILSCALE_AUTH_KEY="tskey-auth-..."
 
@@ -56,4 +66,3 @@ VM_USER="andylombardo"
 # RUN_SERVER_INIT=true           # Run server-init.sh after VM boots
 # RUN_SEC_AUDIT=true             # Run sec-audit.sh --harden after server-init
 # SEC_AUDIT_REPO="https://github.com/BardSec/sec-audit.git"
-# DOTFILES_REPO="git@github.com:BardSec/dotfiles.git"

@@ -1,4 +1,5 @@
 sec-audit.conf
+server-init.conf
 *.log
 *.bak
 .DS_Store

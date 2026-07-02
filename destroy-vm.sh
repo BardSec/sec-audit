@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# destroy-vm — Destroy a VM on ESXi from your Mac
+# destroy-vm — Destroy a VM on Proxmox from your Mac
 # https://github.com/BardSec/sec-audit
 #
 # Usage:
 #   ./destroy-vm.sh --name my-server
+#   ./destroy-vm.sh --id 103
 #   ./destroy-vm.sh --name my-server --dry-run
 #   ./destroy-vm.sh --list
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="2.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONF_FILE="${SCRIPT_DIR}/create-vm.conf"
 
@@ -22,9 +23,13 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Defaults
-ESXI_HOST=""
-ESXI_USER="root"
+PVE_HOST=""
+PVE_PORT=8006
+PVE_USER="root@pam"
+PVE_PASSWORD=""
+PVE_NODE=""
 VM_NAME=""
+VM_ID=""
 DRY_RUN=false
 LIST_MODE=false
 
@@ -36,15 +41,17 @@ fi
 
 usage() {
     cat <<EOF
-destroy-vm v${VERSION} — Destroy a VM on ESXi
+destroy-vm v${VERSION} — Destroy a VM on Proxmox
 
 Usage:
-  $0 --name <vm-name>         Power off and destroy a VM
+  $0 --name <vm-name>            Destroy VM by name
+  $0 --id <vmid>                 Destroy VM by ID
   $0 --name <vm-name> --dry-run  Preview without destroying
-  $0 --list                   List all VMs on the ESXi host
+  $0 --list                      List all VMs
 
 Options:
-  --name NAME     VM name to destroy (required unless --list)
+  --name NAME     VM name to destroy
+  --id N          VM ID to destroy
   --list          List all VMs and their power state
   --dry-run       Show what would happen without destroying
   --config FILE   Use a custom config file
@@ -52,96 +59,143 @@ Options:
 EOF
 }
 
-esxi_ssh() {
-    ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
-        "${ESXI_USER}@${ESXI_HOST}" "$@"
+json_val() {
+    python3 -c "import sys,json; d=json.load(sys.stdin); print(d$1)" 2>/dev/null
+}
+
+urlencode() {
+    python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.stdin.read().strip(), safe=''))"
+}
+
+# Proxmox API
+PVE_TICKET=""
+PVE_CSRF=""
+
+pve_auth() {
+    local response
+    response=$(curl -sk -d "username=${PVE_USER}" \
+        --data-urlencode "password=${PVE_PASSWORD}" \
+        "https://${PVE_HOST}:${PVE_PORT}/api2/json/access/ticket" 2>&1)
+
+    PVE_TICKET=$(echo "$response" | json_val "['data']['ticket']")
+    PVE_CSRF=$(echo "$response" | json_val "['data']['CSRFPreventionToken']")
+
+    if [[ -z "$PVE_TICKET" ]]; then
+        echo -e "  ${RED}[ERROR]${NC} Failed to authenticate to Proxmox"
+        exit 1
+    fi
+}
+
+pve_get() {
+    curl -sk -b "PVEAuthCookie=${PVE_TICKET}" \
+        "https://${PVE_HOST}:${PVE_PORT}/api2/json$1" 2>&1
+}
+
+pve_post() {
+    local path="$1"
+    shift
+    curl -sk -b "PVEAuthCookie=${PVE_TICKET}" \
+        -H "CSRFPreventionToken: ${PVE_CSRF}" \
+        -X POST "$@" \
+        "https://${PVE_HOST}:${PVE_PORT}/api2/json${path}" 2>&1
+}
+
+pve_delete() {
+    local path="$1"
+    local params="${2:-}"
+    curl -sk -b "PVEAuthCookie=${PVE_TICKET}" \
+        -H "CSRFPreventionToken: ${PVE_CSRF}" \
+        -X DELETE \
+        "https://${PVE_HOST}:${PVE_PORT}/api2/json${path}${params:+?$params}" 2>&1
 }
 
 list_vms() {
     echo ""
-    echo -e "${BOLD}VMs on ${ESXI_HOST}:${NC}"
+    echo -e "${BOLD}VMs on ${PVE_HOST} (node: ${PVE_NODE}):${NC}"
     echo ""
 
-    local vm_list
-    vm_list=$(esxi_ssh "vim-cmd vmsvc/getallvms 2>/dev/null | tail -n +2" || true)
+    pve_get "/nodes/${PVE_NODE}/qemu" | python3 -c "
+import sys, json
+data = json.load(sys.stdin).get('data', [])
+if not data:
+    print('  No VMs found.')
+    sys.exit(0)
 
-    if [[ -z "$vm_list" ]]; then
-        echo "  No VMs found."
+print(f'  {\"ID\":<6s} {\"Name\":<30s} {\"Status\":<12s} {\"CPU\":<6s} {\"Memory\":<10s}')
+print(f'  {\"------\":<6s} {\"------------------------------\":<30s} {\"------------\":<12s} {\"------\":<6s} {\"----------\":<10s}')
+
+for vm in sorted(data, key=lambda x: x.get('vmid', 0)):
+    vmid = vm.get('vmid', '??')
+    name = vm.get('name', '??')
+    status = vm.get('status', '??')
+    cpus = vm.get('cpus', '?')
+    mem_gb = vm.get('maxmem', 0) / 1024 / 1024 / 1024
+    color = '\033[0;32m' if status == 'running' else '\033[0;31m'
+    reset = '\033[0m'
+    print(f'  {vmid:<6} {name:<30s} {color}{status:<12s}{reset} {cpus:<6} {mem_gb:.0f}GB')
+"
+    echo ""
+}
+
+resolve_vm_id() {
+    # Resolve VM name to ID if --name was used
+    if [[ -n "$VM_ID" ]]; then
         return
     fi
 
-    # Header
-    printf "  ${BOLD}%-6s %-30s %-12s${NC}\n" "ID" "Name" "Power State"
-    printf "  %-6s %-30s %-12s\n" "------" "------------------------------" "------------"
+    VM_ID=$(pve_get "/nodes/${PVE_NODE}/qemu" | python3 -c "
+import sys, json
+data = json.load(sys.stdin).get('data', [])
+for vm in data:
+    if vm.get('name', '').lower() == '${VM_NAME}'.lower():
+        print(vm['vmid'])
+        sys.exit(0)
+print('')
+" 2>/dev/null || true)
 
-    while IFS= read -r line; do
-        local vmid vmname power_state
-        vmid=$(echo "$line" | awk '{print $1}')
-        vmname=$(echo "$line" | awk '{print $2}')
-
-        power_state=$(esxi_ssh "vim-cmd vmsvc/power.getstate ${vmid} 2>/dev/null | tail -1" || echo "unknown")
-
-        local color="$NC"
-        if [[ "$power_state" == *"Powered on"* ]]; then
-            color="$GREEN"
-        elif [[ "$power_state" == *"Powered off"* ]]; then
-            color="$RED"
-        fi
-
-        printf "  %-6s %-30s ${color}%-12s${NC}\n" "$vmid" "$vmname" "$power_state"
-    done <<< "$vm_list"
-
-    echo ""
+    if [[ -z "$VM_ID" ]]; then
+        echo -e "  ${RED}[ERROR]${NC} VM '${VM_NAME}' not found"
+        echo ""
+        list_vms
+        exit 1
+    fi
 }
 
 destroy_vm() {
     echo ""
     echo -e "${BOLD}destroy-vm v${VERSION}${NC}"
 
-    # Find the VM ID
-    local vmid
-    vmid=$(esxi_ssh "vim-cmd vmsvc/getallvms 2>/dev/null | grep ' ${VM_NAME} ' | awk '{print \$1}'" || true)
+    resolve_vm_id
 
-    if [[ -z "$vmid" ]]; then
-        # Try matching at start of line with different spacing
-        vmid=$(esxi_ssh "vim-cmd vmsvc/getallvms 2>/dev/null | awk '\$2 == \"${VM_NAME}\" {print \$1}'" || true)
-    fi
+    # Get VM info
+    local vm_name vm_status
+    vm_name=$(pve_get "/nodes/${PVE_NODE}/qemu/${VM_ID}/status/current" | json_val "['data']['name']" 2>/dev/null || echo "unknown")
+    vm_status=$(pve_get "/nodes/${PVE_NODE}/qemu/${VM_ID}/status/current" | json_val "['data']['status']" 2>/dev/null || echo "unknown")
 
-    if [[ -z "$vmid" ]]; then
-        echo -e "  ${RED}[ERROR]${NC} VM '${VM_NAME}' not found on ${ESXI_HOST}"
-        echo ""
-        echo "  Available VMs:"
-        esxi_ssh "vim-cmd vmsvc/getallvms 2>/dev/null | tail -n +2 | awk '{print \"    \" \$2}'"
-        exit 1
-    fi
-
-    echo -e "  VM: ${BOLD}${VM_NAME}${NC} (ID: ${vmid})"
-
-    # Check power state
-    local power_state
-    power_state=$(esxi_ssh "vim-cmd vmsvc/power.getstate ${vmid} 2>/dev/null | tail -1" || echo "unknown")
-    echo -e "  State: ${power_state}"
+    echo -e "  VM: ${BOLD}${vm_name}${NC} (ID: ${VM_ID})"
+    echo -e "  Status: ${vm_status}"
 
     if [[ "$DRY_RUN" == true ]]; then
         echo ""
-        echo -e "  ${YELLOW}[DRY-RUN]${NC} Would: Power off VM '${VM_NAME}'"
-        echo -e "  ${YELLOW}[DRY-RUN]${NC} Would: Destroy VM and delete all files"
+        dry "Stop VM '${vm_name}' (ID: ${VM_ID})"
+        dry "Destroy VM and delete all disks"
         echo ""
         return
     fi
 
-    # Power off if running
-    if [[ "$power_state" == *"Powered on"* ]]; then
-        echo -e "  ${BLUE}[INFO]${NC} Powering off..."
-        esxi_ssh "vim-cmd vmsvc/power.off ${vmid}" > /dev/null 2>&1 || true
-        sleep 3
+    # Stop if running
+    if [[ "$vm_status" == "running" ]]; then
+        echo -e "  ${BLUE}[INFO]${NC} Stopping VM..."
+        pve_post "/nodes/${PVE_NODE}/qemu/${VM_ID}/status/stop" > /dev/null
+        sleep 5
     fi
 
-    # Destroy the VM (unregisters and deletes files)
-    echo -e "  ${BLUE}[INFO]${NC} Destroying VM and deleting files..."
-    esxi_ssh "vim-cmd vmsvc/destroy ${vmid}" > /dev/null 2>&1
+    # Destroy
+    echo -e "  ${BLUE}[INFO]${NC} Destroying VM and deleting disks..."
+    local response
+    response=$(pve_delete "/nodes/${PVE_NODE}/qemu/${VM_ID}" "destroy-unreferenced-disks=1&purge=1")
 
-    echo -e "  ${GREEN}[OK]${NC} VM '${VM_NAME}' destroyed"
+    echo -e "  ${GREEN}[OK]${NC} VM '${vm_name}' (ID: ${VM_ID}) destroyed"
     echo ""
 }
 
@@ -150,6 +204,10 @@ parse_args() {
         case "$1" in
             --name)
                 VM_NAME="$2"
+                shift 2
+                ;;
+            --id)
+                VM_ID="$2"
                 shift 2
                 ;;
             --list)
@@ -190,10 +248,16 @@ parse_args() {
 main() {
     parse_args "$@"
 
-    # Validate
-    if [[ -z "$ESXI_HOST" ]]; then
-        echo "Error: ESXI_HOST not configured. Set it in create-vm.conf"
+    if [[ -z "$PVE_HOST" ]]; then
+        echo "Error: PVE_HOST not configured. Set it in create-vm.conf"
         exit 1
+    fi
+
+    pve_auth
+
+    # Auto-detect node
+    if [[ -z "$PVE_NODE" ]]; then
+        PVE_NODE=$(pve_get "/nodes" | json_val "['data'][0]['node']")
     fi
 
     if [[ "$LIST_MODE" == true ]]; then
@@ -201,8 +265,8 @@ main() {
         exit 0
     fi
 
-    if [[ -z "$VM_NAME" ]]; then
-        echo "Error: --name is required (or use --list to see all VMs)"
+    if [[ -z "$VM_NAME" ]] && [[ -z "$VM_ID" ]]; then
+        echo "Error: --name or --id is required (or use --list)"
         usage
         exit 1
     fi

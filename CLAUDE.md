@@ -1,12 +1,16 @@
 # sec-audit
 
-Bash scripts to provision and secure Ubuntu 24.04 LTS servers.
+Bash scripts to provision and secure Ubuntu 24.04 LTS servers on Proxmox.
 
 ## Structure
 
-Two standalone bash scripts — no build system, no dependencies beyond standard Ubuntu packages.
+Standalone bash scripts — no build system, no dependencies beyond curl + python3 on your Mac
+and standard Ubuntu packages on the server.
 
 ```
+create-vm.sh                # Create a VM on Proxmox with cloud-init
+create-vm.conf.example      # VM creation config template
+destroy-vm.sh               # Destroy a VM on Proxmox
 server-init.sh              # Provisioning (Docker, Tailscale, gh, cloudflared, etc.)
 server-init.conf.example    # Provisioning config template
 sec-audit.sh                # Security hardening + audit
@@ -15,10 +19,25 @@ sec-audit.conf.example      # Security config template
 
 ## Workflow
 
-1. `sudo ./server-init.sh` — install standard tooling
-2. `sudo ./sec-audit.sh --harden` — apply security baselines
+1. `./create-vm.sh --name my-server --cpu 4 --memory 8192 --disk 100` — create + provision VM
+   (downloads cloud image, creates VM, waits for SSH, runs server-init + sec-audit)
+2. Or manually on an existing server:
+   - `sudo ./server-init.sh` — install standard tooling
+   - `sudo ./sec-audit.sh --harden` — apply security baselines
 
 ## Key Patterns
+
+### create-vm.sh / destroy-vm.sh
+- Target: Proxmox VE (API-based, no SSH to hypervisor needed)
+- Auth: username + password → API ticket via `/access/ticket`
+- API helpers: `pve_auth`, `pve_get`, `pve_post`, `pve_put`, `pve_delete`, `pve_wait_task`
+- JSON parsing via python3 (available on macOS, no extra deps)
+- Cloud image downloaded to Proxmox storage via `download-url` API
+- VM disk imported via `import-from` parameter on creation
+- Cloud-init configured via Proxmox's built-in cloud-init (no seed ISO)
+- `$DRY_RUN` flag for preview mode
+- Config sourced from `create-vm.conf` (shared between create and destroy)
+- destroy-vm.sh supports both `--name` and `--id` for targeting VMs
 
 ### server-init.sh
 - Each component is an `install_*` function
