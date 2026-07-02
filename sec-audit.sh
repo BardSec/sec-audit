@@ -304,7 +304,6 @@ check_ssh() {
         ["ClientAliveInterval"]="$SSH_IDLE_TIMEOUT"
         ["ClientAliveCountMax"]="$SSH_IDLE_COUNT_MAX"
         ["X11Forwarding"]="no"
-        ["Protocol"]="2"
     )
 
     # In harden mode, build the drop-in file
@@ -360,10 +359,23 @@ check_ssh() {
         changed "SSH hardening written to ${hardening_file}"
     fi
 
-    # Restart SSH if needed
+    # Restart SSH if needed — but ONLY after validating the config.
+    # A bad drop-in (e.g. a directive removed in newer OpenSSH) makes sshd
+    # refuse to start; restarting anyway takes SSH down and locks you out.
     if [[ "$needs_restart" == true && "$MODE" == "harden" && "$DRY_RUN" != true ]]; then
-        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-        changed "SSH service restarted"
+        local test_output
+        if ! test_output=$(sshd -t 2>&1); then
+            fail "sshd config is INVALID — NOT restarting (would lock you out)"
+            echo "$test_output"
+            if [[ -f "$hardening_file" ]]; then
+                rm -f "$hardening_file"
+                warn "Reverted ${hardening_file}; sshd left running on previous config"
+            fi
+        elif systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
+            changed "SSH service restarted"
+        else
+            fail "SSH service failed to restart — check 'systemctl status ssh'"
+        fi
     fi
 }
 
