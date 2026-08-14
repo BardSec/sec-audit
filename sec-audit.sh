@@ -293,10 +293,10 @@ check_ssh() {
         local val=""
         # Check sshd_config.d files first (they override)
         if [[ -d "$sshd_dir" ]]; then
-            val=$(grep -rhi "^\s*${key}\s" "$sshd_dir"/ 2>/dev/null | tail -1 | awk '{print tolower($2)}')
+            val=$(grep -rhi "^\s*${key}\s" "$sshd_dir"/ 2>/dev/null | tail -1 | awk '{print tolower($2)}' || true)
         fi
         if [[ -z "$val" ]]; then
-            val=$(grep -hi "^\s*${key}\s" "$sshd_config" 2>/dev/null | tail -1 | awk '{print tolower($2)}')
+            val=$(grep -hi "^\s*${key}\s" "$sshd_config" 2>/dev/null | tail -1 | awk '{print tolower($2)}' || true)
         fi
         echo "$val"
     }
@@ -428,7 +428,7 @@ check_firewall() {
 
     # Check UFW status
     local ufw_status
-    ufw_status=$(ufw status 2>/dev/null | head -1)
+    ufw_status=$(ufw status 2>/dev/null | head -1 || true)
 
     if [[ "$ufw_status" == "Status: active" ]]; then
         pass "UFW is active"
@@ -594,7 +594,7 @@ findtime = ${FAIL2BAN_FINDTIME}"
 
     if [[ -f "$jail_file" ]] && grep -q "\[sshd\]" "$jail_file"; then
         local current_maxretry
-        current_maxretry=$(grep -A5 "\[sshd\]" "$jail_file" | grep "maxretry" | awk '{print $3}')
+        current_maxretry=$(grep -A5 "\[sshd\]" "$jail_file" | grep "maxretry" | awk '{print $3}' || true)
         if [[ "$current_maxretry" == "$FAIL2BAN_MAXRETRY" ]]; then
             pass "fail2ban SSH jail configured (maxretry=${FAIL2BAN_MAXRETRY})"
         else
@@ -894,7 +894,9 @@ BANNER
 
     # Ensure SSH uses the banner
     local ssh_banner
-    ssh_banner=$(grep -ri "^\s*Banner" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null | tail -1 | awk '{print $2}')
+    # `|| true`: no Banner directive yet is the normal case on a fresh host, but
+    # grep exits 1 and pipefail + set -e would abort the whole run right here.
+    ssh_banner=$(grep -ri "^\s*Banner" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null | tail -1 | awk '{print $2}' || true)
     if [[ "$ssh_banner" == "/etc/issue.net" ]]; then
         pass "SSH Banner configured to /etc/issue.net"
     else
